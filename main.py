@@ -4,6 +4,8 @@ import yaml
 import hashlib
 import zipfile
 import os
+import subprocess
+import urllib.request
 
 
 def load_manifest(zip_path):
@@ -54,17 +56,39 @@ def install(package_name):
 
 def build(package_name):
     print(f"Building {package_name}...")
-    # TODO: Реализовать сборку пакета
+    build_path = f"/usr/local/{package_name}"
+    manifest = load_manifest(f"packages/{package_name}.zip")
+
+    if 'entry_point' not in manifest:
+        print("No entry point specified in manifest. Aborting build.")
+        return
+
+    entry_point = os.path.join(build_path, manifest['entry_point'])
+    if not os.path.exists(entry_point):
+        print("Entry point file not found. Aborting build.")
+        return
+
+    try:
+        subprocess.run(["go", "build", "-o", os.path.join(build_path, package_name), entry_point], check=True)
+        print(f"Package {package_name} built successfully.")
+    except subprocess.CalledProcessError:
+        print("Build failed.")
 
 
 def update():
     print("Updating package cache...")
-    # TODO: Реализовать обновление кэша
+    os.makedirs("packages", exist_ok=True)
+    urllib.request.urlretrieve("http://repository.example.com/package_list.yaml", "packages/package_list.yaml")
+    print("Package cache updated.")
 
 
 def fetch(package_name):
     print(f"Fetching {package_name}...")
-    # TODO: Реализовать скачивание пакета
+    os.makedirs("packages", exist_ok=True)
+    package_url = f"http://repository.example.com/{package_name}.zip"
+    package_path = f"packages/{package_name}.zip"
+    urllib.request.urlretrieve(package_url, package_path)
+    print(f"Package {package_name} fetched successfully.")
 
 
 def main():
