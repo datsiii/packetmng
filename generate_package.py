@@ -22,49 +22,47 @@ def create_manifest(package_name, source_dir):
         "arch": ["x86_64"],
         "entry": "main.go"
     }
-
     manifest_path = os.path.join(source_dir, "manifest.yaml")
     with open(manifest_path, "w") as f:
         yaml.dump(manifest, f)
-
     return manifest_path
 
 def create_package(package_name, source_dir, output_zip):
+    # Создаем временный manifest.yaml
     manifest_path = create_manifest(package_name, source_dir)
 
-    # Создаем архив с временным manifest.yaml
+    # Создаем архив БЕЗ manifest.yaml
     with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zipf:
         for root, _, files in os.walk(source_dir):
             for file in files:
+                if file == "manifest.yaml":
+                    continue  # Пропускаем временный манифест
                 file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, source_dir)
-                zipf.write(file_path, arcname)
+                # Добавляем файлы в корень архива
+                zipf.write(file_path, arcname=os.path.basename(file_path))
 
-    # Вычисляем хеш архива
+    # Вычисляем хеш архива без manifest.yaml
     sha256 = calculate_sha256(output_zip)
 
-    # Обновляем manifest.yaml
+    # Обновляем manifest.yaml с актуальным хешем
     with open(manifest_path, "r") as f:
         manifest = yaml.safe_load(f)
     manifest["sha256"] = sha256
     with open(manifest_path, "w") as f:
         yaml.dump(manifest, f)
 
-    # Обновляем архив с новым manifest.yaml
+    # Добавляем обновленный manifest.yaml в архив
     with zipfile.ZipFile(output_zip, "a", zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(manifest_path, os.path.relpath(manifest_path, source_dir))
+        zipf.write(manifest_path, arcname="manifest.yaml")
 
     print(f"✅ Пакет {package_name} создан: {output_zip}")
     print(f"SHA256: {sha256}")
 
-
-if os.name == "main":
+if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("❌ Использование: python3 generate_manifest.py <папка_с_кодом> <выходной_zip>")
         sys.exit(1)
-
     source_dir = sys.argv[1]
     output_zip = sys.argv[2]
     package_name = os.path.basename(source_dir)
-
     create_package(package_name, source_dir, output_zip)
