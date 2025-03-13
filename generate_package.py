@@ -32,6 +32,7 @@ def create_manifest(package_name, source_dir):
 def create_package(package_name, source_dir, output_zip):
     manifest_path = create_manifest(package_name, source_dir)
 
+    # Создаем архив с временным manifest.yaml
     with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zipf:
         for root, _, files in os.walk(source_dir):
             for file in files:
@@ -39,27 +40,23 @@ def create_package(package_name, source_dir, output_zip):
                 arcname = os.path.relpath(file_path, source_dir)
                 zipf.write(file_path, arcname)
 
+    # Вычисляем хеш архива
     sha256 = calculate_sha256(output_zip)
 
+    # Обновляем manifest.yaml
     with open(manifest_path, "r") as f:
         manifest = yaml.safe_load(f)
-
     manifest["sha256"] = sha256
-
     with open(manifest_path, "w") as f:
         yaml.dump(manifest, f)
 
-    os.remove(output_zip)
-
-    with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(source_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, source_dir)
-                zipf.write(file_path, arcname)
+    # Обновляем архив с новым manifest.yaml
+    with zipfile.ZipFile(output_zip, "a", zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(manifest_path, os.path.relpath(manifest_path, source_dir))
 
     print(f"✅ Пакет {package_name} создан: {output_zip}")
     print(f"SHA256: {sha256}")
+
 
 if os.name == "main":
     if len(sys.argv) != 3:
