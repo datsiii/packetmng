@@ -1,206 +1,163 @@
 import os
-import zipfile
-import subprocess
-import hashlib
 import shutil
-import requests
+import zipfile
 import yaml
+import hashlib
+import requests
+import datetime
+import subprocess
 
 
-# -----------------------------
-# 1. Распаковка архива и чтение манифеста
-# -----------------------------
-def unzip_package(zip_path, extract_to):
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_to)
-    print(f"Архив {zip_path} распакован в {extract_to}")
-
-
-def load_manifest(manifest_path):
-    with open(manifest_path, 'r') as file:
-        manifest = yaml.safe_load(file)
-    print("Манифест загружен:")
-    print(manifest)
-    return manifest
-
-
+# --- Функция вычисления SHA256 ---
 def compute_sha256(file_path):
-    sha256_hash = hashlib.sha256()
+    sha256 = hashlib.sha256()
     with open(file_path, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
+        while chunk := f.read(4096):
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 
-# -----------------------------
-# 2. Проверка компилятора Go и его скачивание
-# -----------------------------
-def check_go_compiler():
+# --- Функция распаковки ZIP-архива ---
+def extract_package(zip_path, extract_to="./extracted"):
+    if os.path.exists(extract_to):
+        shutil.rmtree(extract_to)
+    os.makedirs(extract_to)
+
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall(extract_to)
+
+    print(f"✅ Архив {zip_path} распакован в {extract_to}")
+    return extract_to
+
+
+# --- Функция загрузки манифеста ---
+def load_manifest(manifest_path):
+    with open(manifest_path, "r") as f:
+        return yaml.safe_load(f)
+
+
+# --- Функция скачивания файла ---
+def download_file(url, dest_path, expected_sha256=None):
+    print(f"🔽 Скачивание: {url}")
+    response = requests.get(url, stream=True)
+    response.raise_for_status()
+
+    with open(dest_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+    if expected_sha256:
+        computed_sha = compute_sha256(dest_path)
+        if computed_sha != expected_sha256:
+            os.remove(dest_path)
+            raise ValueError(f"SHA256 не совпадает! Ожидалось: {expected_sha256}, получено: {computed_sha}")
+
+    print(f"Файл загружен: {dest_path}")
+
+
+# --- Функция проверки наличия Go ---
+def check_go_installed():
     try:
-        output = subprocess.check_output(["go", "version"], stderr=subprocess.STDOUT)
-        print("Найден компилятор Go:", output.decode().strip())
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Компилятор Go не найден в системе.")
+        result = subprocess.run(["go", "version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"Найден компилятор Go: {result.stdout.strip()}")
+            return True
+    except FileNotFoundError:
         return False
+    return False
 
 
-def download_go_compiler(url, download_path):
-    print(f"Скачиваем компилятор Go с {url}")
-    response = requests.get(url)
-    if response.status_code == 200:
-        with open(download_path, "wb") as f:
-            f.write(response.content)
-        print(f"Скачивание завершено. Файл сохранён в {download_path}")
-        # Распаковка архива и установка зависит от формата архива
-        # Здесь можно добавить логику распаковки и установки
-    else:
-        raise Exception("Ошибка скачивания компилятора Go")
+# --- Функция установки Go ---
+def install_go(go_info):
+    go_url = go_info["source"]
+    go_sha256 = go_info["sha256"]
+    go_archive = "/tmp/go.tar.gz"
+
+    download_file(go_url, go_archive, go_sha256)
+
+    if os.path.exists("/usr/local/go"):
+        shutil.rmtree("/usr/local/go")
+
+    os.system(f"tar -C /usr/local -xzf {go_archive}")
+    os.environ["PATH"] += os.pathsep + "/usr/local/go/bin"
+    print("Компилятор Go установлен!")
 
 
-# -----------------------------
-# 3. Сборка исходного кода (целевого приложения)
-# -----------------------------
-def build_application(source_dir, entry_point, output_name):
-    output_path = os.path.join(source_dir, "bin", output_name)
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    print(f"Запуск сборки из {source_dir} с точкой входа {entry_point}")
-    try:
-        subprocess.check_call(["go", "build", "-o", output_path, entry_point], cwd=source_dir)
-        print(f"Сборка завершена успешно. Бинарный файл: {output_path}")
-        return output_path
-    except subprocess.CalledProcessError as e:
-        print("Ошибка при сборке:", e)
-        return None
+# --- Функция сборки Go-приложения ---
+def build_go_project(project_path, entry_point, output_binary):
+    os.chdir(project_path)
+    os.makedirs("bin", exist_ok=True)
+
+    binary_path = f"bin/{output_binary}"
+    build_cmd = f"go build -o {binary_path} {entry_point}"
+    result = subprocess.run(build_cmd, shell=True)
+
+    if result.returncode != 0:
+        raise RuntimeError("Ошибка сборки!")
+
+    print(f"Сборка завершена. Бинарник: {binary_path}")
+    return os.path.join(project_path, binary_path)
 
 
-# -----------------------------
-# 4. Выгрузка пакета из репозитория и кеширование зависимостей
-# -----------------------------
-class PackageManager:
-    def __init__(self, cache_dir="~/.pkg_cache"):
-        self.cache_dir = os.path.expanduser(cache_dir)
-        if not os.path.exists(self.cache_dir):
-            os.makedirs(self.cache_dir)
-        print(f"Локальный кэш находится в {self.cache_dir}")
+# --- Функция создания манифеста ---
+def create_manifest(binary_path, entry_point, dependencies):
+    manifest = {
+        "name": "my-go-app",
+        "version": "1.0.0",
+        "entry_point": entry_point,
+        "date": datetime.datetime.now().isoformat(),
+        "dependencies": dependencies,
+        "output_binary": os.path.basename(binary_path),
+        "sha256": compute_sha256(binary_path),
+        "supported_os": ["linux"],
+        "supported_architectures": ["amd64"],
+    }
 
-    def fetch_package(self, url, package_name):
-        """
-        Выгружает (скачивает) пакет по URL и сохраняет в кэш, если он еще не сохранен.
-        """
-        local_zip = os.path.join(self.cache_dir, package_name + ".zip")
-        if os.path.exists(local_zip):
-            print(f"Пакет {package_name} уже есть в кэше.")
-            return local_zip
-        print(f"Скачивание пакета {package_name} с {url}")
-        r = requests.get(url)
-        if r.status_code == 200:
-            with open(local_zip, "wb") as f:
-                f.write(r.content)
-            print("Скачивание завершено.")
-            return local_zip
-        else:
-            raise Exception("Ошибка скачивания пакета")
+    with open("manifest.yaml", "w") as f:
+        yaml.dump(manifest, f, default_flow_style=False)
 
-    def cache_dependency(self, dep_name, package_path):
-        """
-        Кеширует зависимость, копируя архив в локальный кэш.
-        """
-        dest_path = os.path.join(self.cache_dir, dep_name + ".zip")
-        if os.path.exists(dest_path):
-            print(f"Зависимость {dep_name} уже закеширована.")
-        else:
-            shutil.copy(package_path, dest_path)
-            print(f"Зависимость {dep_name} добавлена в локальный кэш.")
-        return dest_path
-
-    def update_cache(self):
-        """
-        Обновляет локальный кэш зависимостей. Можно реализовать, например, сравнение версий
-        или контрольных сумм для каждой зависимости.
-        """
-        # Для простоты выводим сообщение. Логику можно расширить.
-        print(
-            "Обновление локального кэша не реализовано полностью. Здесь можно добавить проверку обновлений зависимостей.")
-
-    def install_dependency(self, dep_name, target_dir="/usr/local"):
-        """
-        Устанавливает зависимость в систему, распаковывая архив из кэша.
-        Например, установка компилятора Go в /usr/local/go.
-        """
-        package_zip = os.path.join(self.cache_dir, dep_name + ".zip")
-        if not os.path.exists(package_zip):
-            print(f"Зависимость {dep_name} не найдена в кэше. Скачайте её.")
-            return False
-        install_dir = os.path.join(target_dir, dep_name)
-        if os.path.exists(install_dir):
-            shutil.rmtree(install_dir)
-        os.makedirs(install_dir, exist_ok=True)
-        with zipfile.ZipFile(package_zip, 'r') as zip_ref:
-            zip_ref.extractall(install_dir)
-        print(f"Зависимость {dep_name} установлена в {install_dir}")
-        return True
+    print("Файл manifest.yaml создан!")
 
 
-# -----------------------------
-# 5. Запуск итогового приложения
-# -----------------------------
-def run_application(binary_path):
-    print(f"Запуск приложения: {binary_path}")
-    try:
-        subprocess.check_call([binary_path])
-    except subprocess.CalledProcessError as e:
-        print("Ошибка при запуске приложения:", e)
+# --- Функция запуска собранного приложения ---
+def run_binary(binary_path):
+    print(f"Запуск: {binary_path}")
+    subprocess.run([binary_path])
 
 
-# -----------------------------
-# Пример рабочего сценария
-# -----------------------------
-if __name__ == "__main__":
-    # Пути и URL-ы для примера
-    test_package_zip = "test-package.zip"  # Архив с исходным кодом и манифестом
-    extract_dir = "./extracted"
+# --- Основная логика работы менеджера ---
+def main(zip_path):
+    extracted_path = extract_package(zip_path)
+    manifest_path = os.path.join(extracted_path, "manifest.yaml")
 
-    # 1. Распаковка архива и загрузка манифеста
-    unzip_package(test_package_zip, extract_dir)
-    manifest_path = os.path.join(extract_dir, "manifest.yaml")
+    if not os.path.exists(manifest_path):
+        raise FileNotFoundError("❌ Файл manifest.yaml не найден!")
+
     manifest = load_manifest(manifest_path)
+    print(f"Манифест загружен: {manifest}")
 
-    # 2. Проверка компилятора Go
-    if not check_go_compiler():
-        # Если компилятор не найден, скачиваем его (пример URL и путь для скачивания)
-        go_download_url = "https://golang.org/dl/go1.17.linux-amd64.tar.gz"
-        go_archive_path = os.path.join(extract_dir, "go.tar.gz")
-        download_go_compiler(go_download_url, go_archive_path)
-        # Здесь дополнительно можно распаковать архив и настроить PATH
+    # Проверяем и устанавливаем Go
+    if not check_go_installed():
+        install_go(manifest["dependencies"][0])  # В данном примере зависимость только одна
 
-    # 3. Сборка приложения
-    # Предполагаем, что в манифесте есть точка входа, например, "main.go"
-    binary_path = build_application(extract_dir, manifest.get("entry_point", "main.go"), manifest["name"])
-    if binary_path:
-        # 4. Проверка SHA256 (например, для бинарного файла)
-        computed_sha256 = compute_sha256(binary_path)
-        if computed_sha256 == manifest.get("sha256"):
-            print("Контрольная сумма совпадает!")
-        else:
-            print("Контрольная сумма не совпадает! Возможно, что-то пошло не так.")
+    # Собираем приложение
+    binary_path = build_go_project(extracted_path, manifest["entry_point"], manifest["output_binary"])
 
-    # 5. Работа с зависимостями через локальный кэш
-    pm = PackageManager()
+    # Проверяем SHA256
+    computed_sha256 = compute_sha256(binary_path)
+    if computed_sha256 != manifest["sha256"]:
+        print("Контрольная сумма не совпадает! Возможно, что-то пошло не так.")
+    else:
+        print("Контрольная сумма совпадает.")
 
-    # Выгрузка пакета зависимости (например, компилятора Go) из репозитория
-    # Здесь url и имя указываются для примера; в реальной ситуации данные будут из манифеста или конфигурации
-    dep_url = "https://example.com/go-compiler.zip"
-    dep_name = "go-compiler"
-    try:
-        dep_package = pm.fetch_package(dep_url, dep_name)
-        pm.cache_dependency(dep_name, dep_package)
-        pm.install_dependency(dep_name, target_dir="/usr/local")
-    except Exception as e:
-        print("Ошибка при работе с зависимостью:", e)
+    # Обновляем манифест с актуальной SHA256
+    create_manifest(binary_path, manifest["entry_point"], manifest["dependencies"])
 
-    # Обновление кэша (опционально)
-    pm.update_cache()
+    # Запускаем собранное приложение
+    run_binary(binary_path)
 
-    # 6. Запуск итогового приложения
-    run_application(binary_path)
+
+# --- Точка входа ---
+if __name__ == "__main__":
+    zip_file = "test-package.zip"  # Укажи свой ZIP-архив
+    main(zip_file)
