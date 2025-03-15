@@ -37,8 +37,11 @@ def check_go_compiler():
         print("Найден компилятор Go:", output.decode().strip())
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Компилятор Go не найден в системе.")
-        return False
+        #print("Компилятор Go не найден в системе.")
+        #return False
+        go_download_url = "https://golang.org/dl/go1.17.linux-amd64.tar.gz"
+        go_archive_path = os.path.join(extract_dir, "go.tar.gz")
+        download_go_compiler(go_download_url, go_archive_path)
 
 
 def download_go_compiler(url, download_path):
@@ -52,7 +55,7 @@ def download_go_compiler(url, download_path):
         raise Exception("Ошибка скачивания компилятора Go")
 
 
-# 3. Сборка исходного кода (целевого приложения)
+# 3. Сборка исходного кода
 def build_application(source_dir, entry_point, output_name):
     output_path = os.path.join(source_dir, "bin", output_name)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -98,10 +101,6 @@ class PackageManager:
             print(f"Зависимость {dep_name} добавлена в локальный кэш.")
         return dest_path
 
-    def update_cache(self):
-        print(
-            "Обновление локального кэша не реализовано полностью. Здесь можно добавить проверку обновлений зависимостей.")
-
     def install_dependency(self, dep_name, target_dir="/usr/local"):
         package_zip = os.path.join(self.cache_dir, dep_name + ".zip")
         if not os.path.exists(package_zip):
@@ -135,10 +134,10 @@ if __name__ == "__main__":
     manifest_path = os.path.join(extract_dir, "manifest.yaml")
     manifest = load_manifest(manifest_path)
 
-    if not check_go_compiler():
+    '''if not check_go_compiler():
         go_download_url = "https://golang.org/dl/go1.17.linux-amd64.tar.gz"
         go_archive_path = os.path.join(extract_dir, "go.tar.gz")
-        download_go_compiler(go_download_url, go_archive_path)
+        download_go_compiler(go_download_url, go_archive_path)'''
 
     binary_path = build_application(extract_dir, manifest.get("entry_point", "main.go"), manifest["name"])
     if binary_path:
