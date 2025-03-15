@@ -48,8 +48,6 @@ def download_go_compiler(url, download_path):
         with open(download_path, "wb") as f:
             f.write(response.content)
         print(f"Скачивание завершено. Файл сохранён в {download_path}")
-        # Распаковка архива и установка зависит от формата архива
-        # Здесь можно добавить логику распаковки и установки
     else:
         raise Exception("Ошибка скачивания компилятора Go")
 
@@ -101,7 +99,6 @@ class PackageManager:
         return dest_path
 
     def update_cache(self):
-        # Для простоты выводим сообщение. Логику можно расширить.
         print(
             "Обновление локального кэша не реализовано полностью. Здесь можно добавить проверку обновлений зависимостей.")
 
