@@ -7,9 +7,7 @@ import requests
 import yaml
 
 
-# -----------------------------
 # 1. Распаковка архива и чтение манифеста
-# -----------------------------
 def unzip_package(zip_path, extract_to):
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to)
@@ -32,9 +30,7 @@ def compute_sha256(file_path):
     return sha256_hash.hexdigest()
 
 
-# -----------------------------
 # 2. Проверка компилятора Go и его скачивание
-# -----------------------------
 def check_go_compiler():
     try:
         output = subprocess.check_output(["go", "version"], stderr=subprocess.STDOUT)
@@ -58,9 +54,7 @@ def download_go_compiler(url, download_path):
         raise Exception("Ошибка скачивания компилятора Go")
 
 
-# -----------------------------
 # 3. Сборка исходного кода (целевого приложения)
-# -----------------------------
 def build_application(source_dir, entry_point, output_name):
     output_path = os.path.join(source_dir, "bin", output_name)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -74,9 +68,7 @@ def build_application(source_dir, entry_point, output_name):
         return None
 
 
-# -----------------------------
 # 4. Выгрузка пакета из репозитория и кеширование зависимостей
-# -----------------------------
 class PackageManager:
     def __init__(self, cache_dir="~/.pkg_cache"):
         self.cache_dir = os.path.expanduser(cache_dir)
@@ -85,9 +77,6 @@ class PackageManager:
         print(f"Локальный кэш находится в {self.cache_dir}")
 
     def fetch_package(self, url, package_name):
-        """
-        Выгружает (скачивает) пакет по URL и сохраняет в кэш, если он еще не сохранен.
-        """
         local_zip = os.path.join(self.cache_dir, package_name + ".zip")
         if os.path.exists(local_zip):
             print(f"Пакет {package_name} уже есть в кэше.")
@@ -103,9 +92,6 @@ class PackageManager:
             raise Exception("Ошибка скачивания пакета")
 
     def cache_dependency(self, dep_name, package_path):
-        """
-        Кеширует зависимость, копируя архив в локальный кэш.
-        """
         dest_path = os.path.join(self.cache_dir, dep_name + ".zip")
         if os.path.exists(dest_path):
             print(f"Зависимость {dep_name} уже закеширована.")
@@ -115,19 +101,11 @@ class PackageManager:
         return dest_path
 
     def update_cache(self):
-        """
-        Обновляет локальный кэш зависимостей. Можно реализовать, например, сравнение версий
-        или контрольных сумм для каждой зависимости.
-        """
         # Для простоты выводим сообщение. Логику можно расширить.
         print(
             "Обновление локального кэша не реализовано полностью. Здесь можно добавить проверку обновлений зависимостей.")
 
     def install_dependency(self, dep_name, target_dir="/usr/local"):
-        """
-        Устанавливает зависимость в систему, распаковывая архив из кэша.
-        Например, установка компилятора Go в /usr/local/go.
-        """
         package_zip = os.path.join(self.cache_dir, dep_name + ".zip")
         if not os.path.exists(package_zip):
             print(f"Зависимость {dep_name} не найдена в кэше. Скачайте её.")
@@ -142,9 +120,7 @@ class PackageManager:
         return True
 
 
-# -----------------------------
 # 5. Запуск итогового приложения
-# -----------------------------
 def run_application(binary_path):
     print(f"Запуск приложения: {binary_path}")
     try:
@@ -153,43 +129,30 @@ def run_application(binary_path):
         print("Ошибка при запуске приложения:", e)
 
 
-# -----------------------------
-# Пример рабочего сценария
-# -----------------------------
+# пример
 if __name__ == "__main__":
-    # Пути и URL-ы для примера
-    test_package_zip = "test-package.zip"  # Архив с исходным кодом и манифестом
+    test_package_zip = "test-package.zip"
     extract_dir = "./extracted"
 
-    # 1. Распаковка архива и загрузка манифеста
     unzip_package(test_package_zip, extract_dir)
     manifest_path = os.path.join(extract_dir, "manifest.yaml")
     manifest = load_manifest(manifest_path)
 
-    # 2. Проверка компилятора Go
     if not check_go_compiler():
-        # Если компилятор не найден, скачиваем его (пример URL и путь для скачивания)
         go_download_url = "https://golang.org/dl/go1.17.linux-amd64.tar.gz"
         go_archive_path = os.path.join(extract_dir, "go.tar.gz")
         download_go_compiler(go_download_url, go_archive_path)
-        # Здесь дополнительно можно распаковать архив и настроить PATH
 
-    # 3. Сборка приложения
-    # Предполагаем, что в манифесте есть точка входа, например, "main.go"
     binary_path = build_application(extract_dir, manifest.get("entry_point", "main.go"), manifest["name"])
     if binary_path:
-        # 4. Проверка SHA256 (например, для бинарного файла)
         computed_sha256 = compute_sha256(binary_path)
         if computed_sha256 == manifest.get("sha256"):
             print("Контрольная сумма совпадает!")
         else:
             print("Контрольная сумма не совпадает! Возможно, что-то пошло не так.")
 
-    # 5. Работа с зависимостями через локальный кэш
     pm = PackageManager()
 
-    # Выгрузка пакета зависимости (например, компилятора Go) из репозитория
-    # Здесь url и имя указываются для примера; в реальной ситуации данные будут из манифеста или конфигурации
     dep_url = "https://example.com/go-compiler.zip"
     dep_name = "go-compiler"
     try:
@@ -199,8 +162,6 @@ if __name__ == "__main__":
     except Exception as e:
         print("Ошибка при работе с зависимостью:", e)
 
-    # Обновление кэша (опционально)
     pm.update_cache()
 
-    # 6. Запуск итогового приложения
     run_application(binary_path)
