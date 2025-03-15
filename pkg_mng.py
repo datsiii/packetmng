@@ -97,7 +97,7 @@ class PackageManager:
         if os.path.exists(dest_path):
             print(f"Зависимость {dep_name} уже закеширована.")
         else:
-            shutil.copy(package_path, dest_path)
+            shutil.copy(package_path, dest_path)#<-------------------------------------------------
             print(f"Зависимость {dep_name} добавлена в локальный кэш.")
         return dest_path
 
@@ -114,6 +114,9 @@ class PackageManager:
             zip_ref.extractall(install_dir)
         print(f"Зависимость {dep_name} установлена в {install_dir}")
         return True
+
+    def update_cache(self):
+        pass
 
 
 # 5. Запуск итогового приложения
